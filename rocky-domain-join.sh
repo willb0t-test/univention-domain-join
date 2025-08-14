@@ -64,12 +64,16 @@ install_dependencies() {
     local required_packages=(
         "python3"
         "python3-pip"
+        "python3-devel"
         "sssd"
         "sssd-ldap" 
         "sssd-krb5"
         "krb5-workstation"
         "authselect"
         "redhat-lsb-core"
+        "openldap-devel"
+        "openssl-devel"
+        "gcc"
     )
     
     for package in "${required_packages[@]}"; do
@@ -89,11 +93,46 @@ install_dependencies() {
     fi
     
     # Install Python dependencies if needed
+    local python_deps_needed=false
+    local pip_packages=()
+    
     if ! python3 -c "import dns.resolver" 2>/dev/null; then
-        log_info "Installing Python DNS library..."
-        pip3 install dnspython || {
-            log_warning "Failed to install dnspython via pip, trying dnf..."
-            dnf install -y python3-dns || log_warning "Could not install python3-dns"
+        pip_packages+=("dnspython")
+        python_deps_needed=true
+    fi
+    
+    if ! python3 -c "import IPy" 2>/dev/null; then
+        pip_packages+=("IPy")
+        python_deps_needed=true
+    fi
+    
+    if ! python3 -c "import ldap" 2>/dev/null; then
+        # Try system package first for python-ldap as it has C dependencies
+        if ! dnf install -y python3-ldap 2>/dev/null; then
+            pip_packages+=("python-ldap")
+        fi
+        python_deps_needed=true
+    fi
+    
+    if [[ "$python_deps_needed" == true && ${#pip_packages[@]} -gt 0 ]]; then
+        log_info "Installing Python dependencies: ${pip_packages[*]}"
+        pip3 install "${pip_packages[@]}" || {
+            log_warning "Some Python packages failed to install via pip"
+            log_info "Trying to install system packages..."
+            
+            # Try system packages as fallback
+            local sys_packages=()
+            for pkg in "${pip_packages[@]}"; do
+                case "$pkg" in
+                    "dnspython") sys_packages+=("python3-dns") ;;
+                    "IPy") sys_packages+=("python3-ipy") ;;
+                    "python-ldap") sys_packages+=("python3-ldap") ;;
+                esac
+            done
+            
+            if [[ ${#sys_packages[@]} -gt 0 ]]; then
+                dnf install -y "${sys_packages[@]}" || log_warning "Could not install some system Python packages"
+            fi
         }
     fi
 }
