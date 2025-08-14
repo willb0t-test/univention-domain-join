@@ -66,26 +66,34 @@ Run `sudo univention-domain-join-cli --help` for more details.
 
 ## Rocky Linux 8
 
-On Rocky Linux 8, you need to install the required dependencies and run from source:
+For Rocky Linux 8, use the provided bash script that handles everything automatically:
 
-1. Install required packages:
-```shell
-sudo dnf install -y python3 python3-pip sssd sssd-ldap sssd-krb5 krb5-workstation authselect
-```
-
-2. Clone and run the domain join tool:
+1. Clone the repository:
 ```shell
 git clone https://github.com/univention/univention-domain-join.git
 cd univention-domain-join
-sudo python3 scripts/cli.py --help
+```
+
+2. Run the domain join script:
+```shell
+# Interactive join (will prompt for credentials)
+sudo ./rocky-domain-join.sh --domain your-domain.com
+
+# Or with specific parameters
+sudo ./rocky-domain-join.sh --dc-ip 192.168.1.10 --username administrator
+
+# Install dependencies only
+sudo ./rocky-domain-join.sh --install-deps
 ```
 
 The Rocky Linux implementation includes:
+- Automatic dependency installation (SSSD, Kerberos, authselect, etc.)
 - SSSD configuration for LDAP authentication
 - Automatic group membership (wheel, audio, video, cdrom, dialout, plugdev)
 - Support for GDM, SDDM, LightDM, and XDM display managers
 - DNS entry creation in UCS domain
 - Machine account creation in LDAP
+- Color-coded output and comprehensive error handling
 
 # Doc
 

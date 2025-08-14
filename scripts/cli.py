@@ -12,6 +12,12 @@ from getpass import getpass
 from logging import getLogger
 from typing import Dict
 
+# Add the project root to Python path for running from source
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from univention_domain_join.distributions import AbstractJoiner
 from univention_domain_join.utils.distributions import get_distribution
 from univention_domain_join.utils.domain import get_master_ip_through_dns, get_ucs_domainname
