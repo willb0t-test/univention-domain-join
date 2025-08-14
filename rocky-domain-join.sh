@@ -59,11 +59,18 @@ check_rocky_linux() {
 install_dependencies() {
     log_info "Installing comprehensive dependencies for Rocky Linux domain join..."
     
+    # Detect Python version
+    local python_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    local python_pkg="python${python_version//.}"
+    
+    log_info "Detected Python version: $python_version"
+    
     # Core system packages
     local packages_to_install=()
     local required_packages=(
-        # Core Python and development tools
-        "python3" "python3-pip" "python3-devel"
+        # Core Python and development tools - use correct version
+        "python3" "python3-pip" 
+        "${python_pkg}" "${python_pkg}-devel"
         "gcc" "gcc-c++" "make"
         
         # SSSD and authentication
@@ -73,8 +80,8 @@ install_dependencies() {
         # Kerberos
         "krb5-workstation" "krb5-libs" "krb5-devel"
         
-        # LDAP
-        "openldap-clients" "openldap-devel"
+        # LDAP - prioritize system package
+        "openldap-clients" "openldap-devel" "python3-ldap"
         
         # SSL/TLS and security
         "openssl-devel" "ca-certificates" "nss-tools"
@@ -86,6 +93,9 @@ install_dependencies() {
         
         # PAM
         "pam" "pam-devel"
+        
+        # Python system packages - install directly
+        "python3-dns" "python3-cryptography"
     )
     
     log_info "Checking system packages..."
@@ -106,67 +116,61 @@ install_dependencies() {
         log_success "All required system packages are already installed"
     fi
     
-    # Install Python dependencies comprehensively
+    # Install Python dependencies - prioritize system packages heavily
     log_info "Installing Python dependencies..."
-    local python_packages=(
-        "dnspython"      # DNS operations
-        "IPy"            # IP address handling
-        "netifaces"      # Network interface info
-        "python-ldap"    # LDAP operations
-        "cryptography"   # SSL/TLS operations
-        "pyasn1"         # ASN.1 parsing
+    
+    # Define system packages and their import names
+    declare -A python_sys_packages=(
+        ["python3-dns"]="dns.resolver"
+        ["python3-ldap"]="ldap"
+        ["python3-cryptography"]="cryptography"
+        ["python3-pyasn1"]="pyasn1"
     )
     
-    local pip_packages=()
-    local sys_packages=()
-    
-    # Check which Python packages are missing
-    for pkg in "${python_packages[@]}"; do
-        local import_name="$pkg"
-        case "$pkg" in
-            "dnspython") import_name="dns.resolver" ;;
-            "python-ldap") import_name="ldap" ;;
-        esac
-        
+    # Install missing system Python packages
+    local sys_packages_to_install=()
+    for sys_pkg in "${!python_sys_packages[@]}"; do
+        local import_name="${python_sys_packages[$sys_pkg]}"
         if ! python3 -c "import $import_name" 2>/dev/null; then
-            # Try system package first
-            local sys_pkg=""
-            case "$pkg" in
-                "dnspython") sys_pkg="python3-dns" ;;
-                "IPy") sys_pkg="python3-ipy" ;;
-                "netifaces") sys_pkg="python3-netifaces" ;;
-                "python-ldap") sys_pkg="python3-ldap" ;;
-                "cryptography") sys_pkg="python3-cryptography" ;;
-                "pyasn1") sys_pkg="python3-pyasn1" ;;
-            esac
-            
-            if [[ -n "$sys_pkg" ]] && dnf list available "$sys_pkg" &>/dev/null; then
-                sys_packages+=("$sys_pkg")
-            else
-                pip_packages+=("$pkg")
-            fi
+            sys_packages_to_install+=("$sys_pkg")
         fi
     done
     
-    # Install system Python packages first
-    if [[ ${#sys_packages[@]} -gt 0 ]]; then
-        log_info "Installing Python system packages: ${sys_packages[*]}"
-        dnf install -y "${sys_packages[@]}" || log_warning "Some system Python packages failed to install"
-    fi
-    
-    # Install remaining packages via pip
-    if [[ ${#pip_packages[@]} -gt 0 ]]; then
-        log_info "Installing Python packages via pip: ${pip_packages[*]}"
-        pip3 install "${pip_packages[@]}" || {
-            log_warning "Some pip packages failed to install"
-            # Try installing one by one for better error reporting
-            for pkg in "${pip_packages[@]}"; do
-                if ! pip3 install "$pkg"; then
-                    log_warning "Failed to install $pkg via pip"
-                fi
-            done
+    if [[ ${#sys_packages_to_install[@]} -gt 0 ]]; then
+        log_info "Installing system Python packages: ${sys_packages_to_install[*]}"
+        dnf install -y "${sys_packages_to_install[@]}" || {
+            log_warning "Some system Python packages failed to install"
         }
     fi
+    
+    # Only install critical packages via pip that don't have system equivalents
+    local pip_only_packages=("IPy" "netifaces")
+    local pip_packages_to_install=()
+    
+    for pkg in "${pip_only_packages[@]}"; do
+        local import_name="$pkg"
+        if ! python3 -c "import $import_name" 2>/dev/null; then
+            pip_packages_to_install+=("$pkg")
+        fi
+    done
+    
+    # Install pip packages one by one with error handling
+    for pkg in "${pip_packages_to_install[@]}"; do
+        log_info "Installing $pkg via pip..."
+        if ! pip3 install "$pkg"; then
+            log_warning "Failed to install $pkg via pip, trying alternatives..."
+            
+            # Try alternative system packages
+            case "$pkg" in
+                "IPy")
+                    dnf install -y python3-ipy 2>/dev/null || log_warning "Could not install IPy"
+                    ;;
+                "netifaces")
+                    dnf install -y python3-netifaces 2>/dev/null || log_warning "Could not install netifaces"
+                    ;;
+            esac
+        fi
+    done
     
     # Verify critical imports
     log_info "Verifying Python dependencies..."
