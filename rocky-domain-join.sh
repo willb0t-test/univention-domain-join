@@ -116,59 +116,46 @@ install_dependencies() {
         log_success "All required system packages are already installed"
     fi
     
-    # Install Python dependencies - prioritize system packages heavily
+    # Install Python dependencies with comprehensive approach
     log_info "Installing Python dependencies..."
     
-    # Define system packages and their import names
-    declare -A python_sys_packages=(
-        ["python3-dns"]="dns.resolver"
-        ["python3-ldap"]="ldap"
-        ["python3-cryptography"]="cryptography"
-        ["python3-pyasn1"]="pyasn1"
+    # First, ensure EPEL is available for additional packages
+    dnf install -y epel-release 2>/dev/null || log_warning "EPEL already available or not needed"
+    
+    # Install all Python system packages we can find
+    local all_python_packages=(
+        "python3-dns" "python3-ldap" "python3-cryptography" 
+        "python3-pyasn1" "python3-ipy" "python3-netifaces"
+        "python39-dns" "python39-ldap" "python39-cryptography"
+        "python39-pyasn1" "python39-ipy" "python39-netifaces"
     )
     
-    # Install missing system Python packages
-    local sys_packages_to_install=()
-    for sys_pkg in "${!python_sys_packages[@]}"; do
-        local import_name="${python_sys_packages[$sys_pkg]}"
-        if ! python3 -c "import $import_name" 2>/dev/null; then
-            sys_packages_to_install+=("$sys_pkg")
+    log_info "Attempting to install all available Python system packages..."
+    for pkg in "${all_python_packages[@]}"; do
+        if dnf list available "$pkg" &>/dev/null; then
+            log_info "Installing $pkg..."
+            dnf install -y "$pkg" 2>/dev/null || log_warning "Failed to install $pkg"
         fi
     done
     
-    if [[ ${#sys_packages_to_install[@]} -gt 0 ]]; then
-        log_info "Installing system Python packages: ${sys_packages_to_install[*]}"
-        dnf install -y "${sys_packages_to_install[@]}" || {
-            log_warning "Some system Python packages failed to install"
-        }
+    # Install pip if not available and install missing packages
+    if ! command -v pip3 &>/dev/null; then
+        log_info "Installing pip3..."
+        dnf install -y python3-pip || log_warning "Could not install pip3"
     fi
     
-    # Only install critical packages via pip that don't have system equivalents
-    local pip_only_packages=("IPy" "netifaces")
-    local pip_packages_to_install=()
-    
-    for pkg in "${pip_only_packages[@]}"; do
+    # Install remaining packages via pip only if really needed
+    local critical_packages=("dnspython" "IPy" "netifaces" "python-ldap")
+    for pkg in "${critical_packages[@]}"; do
         local import_name="$pkg"
+        case "$pkg" in
+            "dnspython") import_name="dns.resolver" ;;
+            "python-ldap") import_name="ldap" ;;
+        esac
+        
         if ! python3 -c "import $import_name" 2>/dev/null; then
-            pip_packages_to_install+=("$pkg")
-        fi
-    done
-    
-    # Install pip packages one by one with error handling
-    for pkg in "${pip_packages_to_install[@]}"; do
-        log_info "Installing $pkg via pip..."
-        if ! pip3 install "$pkg"; then
-            log_warning "Failed to install $pkg via pip, trying alternatives..."
-            
-            # Try alternative system packages
-            case "$pkg" in
-                "IPy")
-                    dnf install -y python3-ipy 2>/dev/null || log_warning "Could not install IPy"
-                    ;;
-                "netifaces")
-                    dnf install -y python3-netifaces 2>/dev/null || log_warning "Could not install netifaces"
-                    ;;
-            esac
+            log_info "Installing $pkg via pip as fallback..."
+            pip3 install "$pkg" || log_warning "Failed to install $pkg via pip"
         fi
     done
     
