@@ -6,7 +6,11 @@ import os
 import socket
 import subprocess
 from functools import wraps
-from pipes import quote
+try:
+    from pipes import quote
+except ImportError:
+    # pipes module was deprecated in Python 3.11+ and removed in Python 3.13
+    from shlex import quote
 from typing import Any, Callable, List, TypeVar, Union, cast
 
 F = TypeVar('F', bound=Callable[..., Any])
